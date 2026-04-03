@@ -1,4 +1,4 @@
-name: Release
+name: Docker Release
 
 on:
   push:
@@ -12,69 +12,10 @@ on:
         type: string
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
-  update-version:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Update VERSION file
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.tag }}
-            VERSION=${VERSION#v}
-          else
-            VERSION=${GITHUB_REF#refs/tags/v}
-          fi
-          echo "$VERSION" > backend/cmd/server/VERSION
-          echo "Updated VERSION file to: $VERSION"
-
-      - name: Upload VERSION artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: version-file
-          path: backend/cmd/server/VERSION
-          retention-days: 1
-
-  build-frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: pnpm install --frozen-lockfile
-
-      - name: Build frontend
-        working-directory: frontend
-        run: pnpm run build
-
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: frontend-dist
-          path: backend/internal/web/dist/
-          retention-days: 1
-
-  release:
-    needs: [update-version, build-frontend]
+  docker:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -83,28 +24,25 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Download VERSION artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: version-file
-          path: backend/cmd/server/
-
-      - name: Download frontend artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: frontend-dist
-          path: backend/internal/web/dist/
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: backend/go.mod
-          check-latest: false
-          cache-dependency-path: backend/go.sum
-
-      - name: Verify Go version
+      - name: Resolve release metadata
+        id: meta_vars
         run: |
-          go version | grep -q 'go1.26.1'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG_NAME=${{ github.event.inputs.tag }}
+          else
+            TAG_NAME=${GITHUB_REF#refs/tags/}
+          fi
+
+          VERSION=${TAG_NAME#v}
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MAJOR_MINOR=$(echo "$VERSION" | cut -d. -f1,2)
+
+          echo "tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
+          echo "major_minor=${MAJOR_MINOR}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -112,92 +50,50 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to DockerHub
-        if: ${{ env.DOCKERHUB_USERNAME != '' }}
+      - name: Log in to Docker Hub
         uses: docker/login-action@v3
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Fetch tags with annotations
-        run: |
-          git fetch --tags --force
-
-      - name: Get tag message
-        id: tag_message
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG_NAME=${{ github.event.inputs.tag }}
-          else
-            TAG_NAME=${GITHUB_REF#refs/tags/}
-          fi
-          echo "Processing tag: $TAG_NAME"
-
-          TAG_MESSAGE=$(git tag -l --format='%(contents:body)' "$TAG_NAME")
-
-          echo "Tag message length: ${#TAG_MESSAGE}"
-          echo "Tag message preview:"
-          echo "$TAG_MESSAGE" | head -10
-
-          echo "message<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$TAG_MESSAGE" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v7
+      - name: Generate Docker tags and labels
+        id: docker_meta
+        uses: docker/metadata-action@v5
         with:
-          version: '~> v2'
-          args: release --clean --skip=validate
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_MESSAGE: ${{ steps.tag_message.outputs.message }}
-          GITHUB_REPO_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPO_NAME: ${{ github.event.repository.name }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || 'skip' }}
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/sub2api
+          tags: |
+            type=raw,value=${{ steps.meta_vars.outputs.version }}
+            type=raw,value=latest
+            type=raw,value=${{ steps.meta_vars.outputs.tag }}
+            type=raw,value=${{ steps.meta_vars.outputs.major_minor }}
+            type=raw,value=${{ steps.meta_vars.outputs.major }}
+          labels: |
+            org.opencontainers.image.title=Sub2API
+            org.opencontainers.image.description=Sub2API - AI API Gateway Platform
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta_vars.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.meta_vars.outputs.build_date }}
 
-      - name: Update DockerHub description
-        if: ${{ env.DOCKERHUB_USERNAME != '' }}
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta_vars.outputs.version }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ steps.meta_vars.outputs.build_date }}
+
+      - name: Update Docker Hub description
         uses: peter-evans/dockerhub-description@v5
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ secrets.DOCKERHUB_USERNAME }}/sub2api
           short-description: "Sub2API - AI API Gateway Platform"
           readme-filepath: ./deploy/DOCKER.md
-
-  sync-version-file:
-    needs: [release]
-    if: ${{ needs.release.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout default branch
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-
-      - name: Sync VERSION file to released tag
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=${{ github.event.inputs.tag }}
-            VERSION=${VERSION#v}
-          else
-            VERSION=${GITHUB_REF#refs/tags/v}
-          fi
-
-          CURRENT_VERSION=$(tr -d '\r\n' < backend/cmd/server/VERSION || true)
-          if [ "$CURRENT_VERSION" = "$VERSION" ]; then
-            echo "VERSION file already matches $VERSION"
-            exit 0
-          fi
-
-          echo "$VERSION" > backend/cmd/server/VERSION
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend/cmd/server/VERSION
-          git commit -m "chore: sync VERSION to ${VERSION} [skip ci]"
-          git push origin HEAD:${{ github.event.repository.default_branch }}
