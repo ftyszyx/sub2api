@@ -101,5 +101,9 @@ func TestAccountHandlerGetAvailableModels_OpenAIOAuthPassthroughFallsBackToDefau
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.NotEmpty(t, resp.Data)
-	require.NotEqual(t, "gpt-5", resp.Data[0].ID)
+	modelIDs := make([]string, 0, len(resp.Data))
+	for _, model := range resp.Data {
+		modelIDs = append(modelIDs, model.ID)
+	}
+	require.Contains(t, modelIDs, "gpt-image-2")
 }

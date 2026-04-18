@@ -114,6 +114,12 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			want:    "gpt-5.1",
 		},
 		{
+			name:    "oauth preserves image generation models",
+			account: &Account{Type: AccountTypeOAuth},
+			model:   "gpt-image-2",
+			want:    "gpt-image-2",
+		},
+		{
 			name:    "apikey preserves custom compatible model",
 			account: &Account{Type: AccountTypeAPIKey},
 			model:   "gemini-3-flash-preview",

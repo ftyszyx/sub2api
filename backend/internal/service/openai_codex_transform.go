@@ -284,10 +284,26 @@ func normalizeCodexModel(model string) string {
 }
 
 func normalizeOpenAIModelForUpstream(account *Account, model string) string {
+	normalized := strings.TrimSpace(model)
 	if account == nil || account.Type == AccountTypeOAuth {
-		return normalizeCodexModel(model)
+		if isOpenAIImageGenerationModel(normalized) {
+			return normalized
+		}
+		return normalizeCodexModel(normalized)
 	}
-	return strings.TrimSpace(model)
+	return normalized
+}
+
+func isOpenAIImageGenerationModel(model string) bool {
+	modelID := strings.TrimSpace(strings.ToLower(model))
+	if modelID == "" {
+		return false
+	}
+	if strings.Contains(modelID, "/") {
+		parts := strings.Split(modelID, "/")
+		modelID = parts[len(parts)-1]
+	}
+	return strings.HasPrefix(modelID, "gpt-image-")
 }
 
 func SupportsVerbosity(model string) bool {
