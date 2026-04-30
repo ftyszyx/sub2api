@@ -769,18 +769,6 @@ func normalizeOpenAIModelForUpstream(account *Account, model string) string {
 	return normalized
 }
 
-func isOpenAIImageGenerationModel(model string) bool {
-	modelID := strings.TrimSpace(strings.ToLower(model))
-	if modelID == "" {
-		return false
-	}
-	if strings.Contains(modelID, "/") {
-		parts := strings.Split(modelID, "/")
-		modelID = parts[len(parts)-1]
-	}
-	return strings.HasPrefix(modelID, "gpt-image-")
-}
-
 func SupportsVerbosity(model string) bool {
 	if !strings.HasPrefix(model, "gpt-") {
 		return true
