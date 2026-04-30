@@ -121,6 +121,29 @@ cp deploy/config.example.yaml backend/config.yaml
 - PostgreSQL: `127.0.0.1:5432`
 - Redis: `127.0.0.1:6379`
 
+如果前端页面不是通过本项目自带代理访问后端，而是浏览器直接从另一个源请求接口，例如页面在 `http://127.0.0.1:4321`、接口在 `https://sub2api.1postpro.com`，那就需要在后端配置里显式放行该来源。否则浏览器预检 `OPTIONS` 会失败，并出现类似下面的报错：
+
+```text
+No 'Access-Control-Allow-Origin' header is present on the requested resource
+```
+
+可以在实际运行使用的 `config.yaml` 中加入：
+
+```yaml
+cors:
+  allowed_origins:
+    - "http://127.0.0.1:4321"
+    - "http://localhost:4321"
+  allow_credentials: true
+```
+
+补充说明：
+
+- 源码方式启动时，通常修改 `backend/config.yaml`
+- Docker / 1Panel 部署时，通常修改 `deploy/data/config.yaml`
+- 如果临时想对所有来源开放，可以写成 `allowed_origins: ["*"]`，但这时 `allow_credentials` 必须设为 `false`
+- 修改后需要重启后端服务
+
 ### 3.3 启动后端
 
 ```bash
@@ -299,6 +322,32 @@ pnpm typecheck
 pnpm build
 ```
 
+## 补充：CORS / 跨域说明
+
+如果浏览器直接调用图片接口，例如 `/v1/images/generations` 或 `/v1/images/edits`，它们和其他 API 一样都会走全局 CORS 中间件；这不是图片接口单独配置的问题。
+
+典型报错：
+
+```text
+Access to fetch at 'https://.../v1/images/generations' from origin 'http://127.0.0.1:4321' has been blocked by CORS policy
+```
+
+推荐配置：
+
+```yaml
+cors:
+  allowed_origins:
+    - "http://127.0.0.1:4321"
+    - "http://localhost:4321"
+  allow_credentials: true
+```
+
+说明：
+- `allowed_origins` 留空时，后端会拒绝跨域预检请求
+- `allow_credentials: true` 不能与 `allowed_origins: ["*"]` 同时使用
+- 如果前端 dev server 已经把请求代理到同源后端，一般不需要额外处理 CORS
+- 配置改完后，记得重启服务再验证
+
 ## 6. 与 CI 对齐的命令
 
 当前 CI 主要跑这几项：
@@ -444,3 +493,4 @@ pnpm test:run
 pnpm typecheck
 pnpm build
 ```
+ 
