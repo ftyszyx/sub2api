@@ -834,14 +834,10 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 }
 
 func normalizeOpenAIModelForUpstream(account *Account, model string) string {
-	normalized := strings.TrimSpace(model)
 	if account == nil || account.Type == AccountTypeOAuth {
-		if isOpenAIImageGenerationModel(normalized) {
-			return normalized
-		}
-		return normalizeCodexModel(normalized)
+		return normalizeCodexModel(model)
 	}
-	return normalized
+	return strings.TrimSpace(model)
 }
 
 func SupportsVerbosity(model string) bool {

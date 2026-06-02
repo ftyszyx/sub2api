@@ -262,12 +262,6 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			want:    "gpt-5.4",
 		},
 		{
-			name:    "oauth preserves image generation models",
-			account: &Account{Type: AccountTypeOAuth},
-			model:   "gpt-image-2",
-			want:    "gpt-image-2",
-		},
-		{
 			name:    "oauth preserves codex auto review model",
 			account: &Account{Type: AccountTypeOAuth},
 			model:   "codex-auto-review",
