@@ -3500,6 +3500,10 @@ export default {
         responsesModeForceResponses: '强制 Responses',
         responsesModeForceChatCompletions: '强制 Chat Completions',
         responsesModeTextDisabledHint: '未启用 Responses / Chat Completions 端点时，此设置不适用。',
+        responsesPathMode: 'Responses 上游路径',
+        responsesPathModeDesc: '控制该 API Key 账号转发 Responses 时使用的上游端点路径。',
+        responsesPathModeStandardV1: '标准 /v1/responses',
+        responsesPathModeBareResponses: '仅 /responses',
         endpointCapabilities: '端点能力',
         endpointCapabilitiesDesc:
           '用于调度筛选。文本端点会跟随上方 Responses API 支持显示为 Responses、Chat Completions 或自动模式；Embeddings 独立控制 /v1/embeddings。',

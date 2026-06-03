@@ -997,6 +997,7 @@ export interface CodexUsageSnapshot {
 
 export type OpenAICompactMode = 'auto' | 'force_on' | 'force_off'
 export type OpenAIResponsesMode = 'auto' | 'force_responses' | 'force_chat_completions'
+export type OpenAIResponsesPathMode = 'standard_v1' | 'bare_responses'
 export type OpenAIEndpointCapability = 'chat_completions' | 'embeddings'
 
 export interface OpenAICompactState {
@@ -1009,6 +1010,7 @@ export interface OpenAICompactState {
 
 export interface OpenAIResponsesState {
   openai_responses_mode?: OpenAIResponsesMode
+  openai_responses_path_mode?: OpenAIResponsesPathMode
   openai_responses_supported?: boolean
 }
 

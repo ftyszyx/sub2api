@@ -1470,6 +1470,21 @@
         >
           {{ t('admin.accounts.openai.responsesModeTextDisabledHint') }}
         </div>
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <label class="input-label mb-0">{{ t('admin.accounts.openai.responsesPathMode') }}</label>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('admin.accounts.openai.responsesPathModeDesc') }}
+            </p>
+          </div>
+          <div class="w-56">
+            <Select
+              v-model="openAIResponsesPathMode"
+              :options="openAIResponsesPathModeOptions"
+              data-testid="openai-responses-path-mode-select"
+            />
+          </div>
+        </div>
         <div>
           <label class="input-label mb-2 block">{{ t('admin.accounts.openai.endpointCapabilities') }}</label>
           <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -2387,6 +2402,7 @@ import type {
   CheckMixedChannelResponse,
   OpenAICompactMode,
   OpenAIResponsesMode,
+  OpenAIResponsesPathMode,
   OpenAIEndpointCapability
 } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -2580,6 +2596,7 @@ const customBaseUrl = ref('')
 const openaiPassthroughEnabled = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
+const openAIResponsesPathMode = ref<OpenAIResponsesPathMode>('standard_v1')
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
@@ -2688,6 +2705,10 @@ const openAIResponsesModeOptions = computed(() => [
   { value: 'force_responses', label: t('admin.accounts.openai.responsesModeForceResponses') },
   { value: 'force_chat_completions', label: t('admin.accounts.openai.responsesModeForceChatCompletions') }
 ])
+const openAIResponsesPathModeOptions = computed(() => [
+  { value: 'standard_v1', label: t('admin.accounts.openai.responsesPathModeStandardV1') },
+  { value: 'bare_responses', label: t('admin.accounts.openai.responsesPathModeBareResponses') }
+])
 const openAITextEndpointCapabilityLabel = computed(() => {
   if (openAIResponsesMode.value === 'force_responses') {
     return t('admin.accounts.openai.capabilityResponses')
@@ -2772,6 +2793,12 @@ const normalizeOpenAIResponsesMode = (mode: unknown): OpenAIResponsesMode => {
     return mode
   }
   return 'auto'
+}
+const normalizeOpenAIResponsesPathMode = (mode: unknown): OpenAIResponsesPathMode => {
+  if (mode === 'bare_responses') {
+    return 'bare_responses'
+  }
+  return 'standard_v1'
 }
 const isOpenAIModelRestrictionDisabled = computed(() =>
   props.account?.platform === 'openai' && openaiPassthroughEnabled.value
@@ -2956,6 +2983,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   openaiPassthroughEnabled.value = false
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
+  openAIResponsesPathMode.value = 'standard_v1'
   openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
   openAICompactModelMappings.value = []
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
@@ -2970,6 +2998,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     openAICompactMode.value = (extra?.openai_compact_mode as OpenAICompactMode) || 'auto'
     if (newAccount.type === 'apikey') {
       openAIResponsesMode.value = normalizeOpenAIResponsesMode(extra?.openai_responses_mode)
+      openAIResponsesPathMode.value = normalizeOpenAIResponsesPathMode(extra?.openai_responses_path_mode)
       openAIEndpointCapabilities.value = readOpenAIEndpointCapabilities(
         newAccount.credentials as Record<string, unknown> | undefined
       )
@@ -4102,6 +4131,11 @@ const handleSubmit = async () => {
           delete newExtra.openai_responses_mode
         } else {
           newExtra.openai_responses_mode = openAIResponsesMode.value
+        }
+        if (openAIResponsesPathMode.value === 'bare_responses') {
+          newExtra.openai_responses_path_mode = openAIResponsesPathMode.value
+        } else {
+          delete newExtra.openai_responses_path_mode
         }
 		}
 		if (autoPause5hThreshold.value != null && autoPause5hThreshold.value > 0) {

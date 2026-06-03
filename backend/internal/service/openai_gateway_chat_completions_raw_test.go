@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -77,6 +78,23 @@ func TestBuildOpenAIResponsesURL_ProbeURL(t *testing.T) {
 			require.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestBuildOpenAIResponsesURLForAccount_BareResponsesPathMode(t *testing.T) {
+	t.Parallel()
+
+	account := &Account{
+		Type: AccountTypeAPIKey,
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesPathMode: string(openai_compat.ResponsesPathModeBareResponses),
+		},
+	}
+
+	got := buildOpenAIResponsesURLForAccount("https://gpt-proxy.example/gpt-proxy/api", account)
+	require.Equal(t, "https://gpt-proxy.example/gpt-proxy/api/responses", got)
+
+	defaultGot := buildOpenAIResponsesURLForAccount("https://gpt-proxy.example/gpt-proxy/api", &Account{Type: AccountTypeAPIKey})
+	require.Equal(t, "https://gpt-proxy.example/gpt-proxy/api/v1/responses", defaultGot)
 }
 
 func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDownstream(t *testing.T) {

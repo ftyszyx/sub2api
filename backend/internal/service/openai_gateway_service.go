@@ -3437,7 +3437,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			if err != nil {
 				return nil, err
 			}
-			targetURL = buildOpenAIResponsesURL(validatedURL)
+			targetURL = buildOpenAIResponsesURLForAccount(validatedURL, account)
 		}
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
@@ -4160,7 +4160,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			if err != nil {
 				return nil, err
 			}
-			targetURL = buildOpenAIResponsesURL(validatedURL)
+			targetURL = buildOpenAIResponsesURLForAccount(validatedURL, account)
 		}
 	default:
 		targetURL = openaiPlatformAPIURL
@@ -5427,6 +5427,17 @@ func (s *OpenAIGatewayService) validateUpstreamBaseURL(raw string) (string, erro
 // - 其他情况：追加 /v1/responses
 func buildOpenAIResponsesURL(base string) string {
 	return buildOpenAIEndpointURL(base, "/v1/responses")
+}
+
+func buildOpenAIBareResponsesURL(base string) string {
+	return buildOpenAIEndpointURL(base, "/responses")
+}
+
+func buildOpenAIResponsesURLForAccount(base string, account *Account) string {
+	if account != nil && account.Type == AccountTypeAPIKey && openai_compat.ShouldUseBareResponsesPath(account.Extra) {
+		return buildOpenAIBareResponsesURL(base)
+	}
+	return buildOpenAIResponsesURL(base)
 }
 
 func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
