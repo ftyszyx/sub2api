@@ -1,6 +1,8 @@
 package apicompat
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -301,7 +303,7 @@ func responsesToolChoiceToChatToolChoice(raw json.RawMessage) json.RawMessage {
 // response into a Responses API response.
 func ChatCompletionsResponseToResponses(resp *ChatCompletionsResponse, model string) *ResponsesResponse {
 	id := ""
-	if resp != nil {
+	if resp != nil && isResponsesID(resp.ID) {
 		id = resp.ID
 	}
 	if id == "" {
@@ -449,6 +451,7 @@ type ChatCompletionsToResponsesStreamState struct {
 	CompletedSent  bool
 
 	MessageItemID string
+	ContentPartID string
 	Text          strings.Builder
 	Reasoning     strings.Builder
 	ToolCalls     map[int]*ChatToolCall
@@ -476,7 +479,7 @@ func ChatCompletionsChunkToResponsesEvents(
 	if chunk == nil || state == nil {
 		return nil
 	}
-	if chunk.ID != "" {
+	if isResponsesID(chunk.ID) {
 		state.ResponseID = chunk.ID
 	}
 	if state.Model == "" && chunk.Model != "" {
@@ -492,6 +495,7 @@ func ChatCompletionsChunkToResponsesEvents(
 	for _, choice := range chunk.Choices {
 		if choice.Delta.Content != nil {
 			events = append(events, ensureChatToResponsesMessageItem(state)...)
+			events = append(events, ensureChatToResponsesContentPart(state)...)
 			_, _ = state.Text.WriteString(*choice.Delta.Content)
 			events = append(events, chatToResponsesEvent(state, "response.output_text.delta", &ResponsesStreamEvent{
 				OutputIndex:  0,
@@ -502,11 +506,6 @@ func ChatCompletionsChunkToResponsesEvents(
 		}
 		if choice.Delta.ReasoningContent != nil {
 			_, _ = state.Reasoning.WriteString(*choice.Delta.ReasoningContent)
-			events = append(events, chatToResponsesEvent(state, "response.reasoning_summary_text.delta", &ResponsesStreamEvent{
-				OutputIndex:  0,
-				SummaryIndex: 0,
-				Delta:        *choice.Delta.ReasoningContent,
-			}))
 		}
 		for _, toolCall := range choice.Delta.ToolCalls {
 			idx := 0
@@ -520,6 +519,7 @@ func ChatCompletionsChunkToResponsesEvents(
 					copyCall.ID = generateItemID()
 				}
 				copyCall.Type = "function"
+				copyCall.Function.Arguments = ""
 				state.ToolCalls[idx] = &copyCall
 				stored = &copyCall
 				events = append(events, chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
@@ -566,11 +566,18 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 	var events []ResponsesStreamEvent
 	events = append(events, ensureChatToResponsesCreated(state)...)
 	if state.MessageItemID != "" {
+		events = append(events, ensureChatToResponsesContentPart(state)...)
 		events = append(events, chatToResponsesEvent(state, "response.output_text.done", &ResponsesStreamEvent{
 			OutputIndex:  0,
 			ContentIndex: 0,
 			Text:         state.Text.String(),
 			ItemID:       state.MessageItemID,
+		}))
+		events = append(events, chatToResponsesEvent(state, "response.content_part.done", &ResponsesStreamEvent{
+			OutputIndex:  0,
+			ContentIndex: 0,
+			ItemID:       state.MessageItemID,
+			Part:         responseOutputTextPart(state.Text.String()),
 		}))
 		events = append(events, chatToResponsesEvent(state, "response.output_item.done", &ResponsesStreamEvent{
 			OutputIndex: 0,
@@ -579,6 +586,37 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 				ID:     state.MessageItemID,
 				Role:   "assistant",
 				Status: "completed",
+				Content: []ResponsesContentPart{{
+					Type: "output_text",
+					Text: state.Text.String(),
+				}},
+			},
+		}))
+	}
+	for i := 0; i < len(state.ToolCalls); i++ {
+		toolCall, ok := state.ToolCalls[i]
+		if !ok || toolCall == nil {
+			continue
+		}
+		arguments := toolCall.Function.Arguments
+		if strings.TrimSpace(arguments) == "" {
+			arguments = "{}"
+		}
+		events = append(events, chatToResponsesEvent(state, "response.function_call_arguments.done", &ResponsesStreamEvent{
+			OutputIndex: i + 1,
+			CallID:      toolCall.ID,
+			Name:        toolCall.Function.Name,
+			Arguments:   arguments,
+		}))
+		events = append(events, chatToResponsesEvent(state, "response.output_item.done", &ResponsesStreamEvent{
+			OutputIndex: i + 1,
+			Item: &ResponsesOutput{
+				Type:      "function_call",
+				ID:        generateItemID(),
+				CallID:    toolCall.ID,
+				Name:      toolCall.Function.Name,
+				Arguments: arguments,
+				Status:    "completed",
 			},
 		}))
 	}
@@ -595,6 +633,7 @@ func FinalizeChatCompletionsResponsesStream(state *ChatCompletionsToResponsesStr
 		Response: &ResponsesResponse{
 			ID:                state.ResponseID,
 			Object:            "response",
+			CreatedAt:         state.Created,
 			Model:             state.Model,
 			Status:            status,
 			Output:            state.chatOutput(),
@@ -610,22 +649,25 @@ func ensureChatToResponsesCreated(state *ChatCompletionsToResponsesStreamState) 
 		return nil
 	}
 	state.CreatedSent = true
-	return []ResponsesStreamEvent{chatToResponsesEvent(state, "response.created", &ResponsesStreamEvent{
-		Response: &ResponsesResponse{
-			ID:     state.ResponseID,
-			Object: "response",
-			Model:  state.Model,
-			Status: "in_progress",
-			Output: []ResponsesOutput{},
-		},
-	})}
+	response := &ResponsesResponse{
+		ID:        state.ResponseID,
+		Object:    "response",
+		CreatedAt: state.Created,
+		Model:     state.Model,
+		Status:    "in_progress",
+		Output:    []ResponsesOutput{},
+	}
+	return []ResponsesStreamEvent{
+		chatToResponsesEvent(state, "response.created", &ResponsesStreamEvent{Response: response}),
+		chatToResponsesEvent(state, "response.in_progress", &ResponsesStreamEvent{Response: response}),
+	}
 }
 
 func ensureChatToResponsesMessageItem(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
 	if state.MessageItemID != "" {
 		return nil
 	}
-	state.MessageItemID = generateItemID()
+	state.MessageItemID = generateMessageID()
 	return []ResponsesStreamEvent{chatToResponsesEvent(state, "response.output_item.added", &ResponsesStreamEvent{
 		OutputIndex: 0,
 		Item: &ResponsesOutput{
@@ -634,6 +676,19 @@ func ensureChatToResponsesMessageItem(state *ChatCompletionsToResponsesStreamSta
 			Role:   "assistant",
 			Status: "in_progress",
 		},
+	})}
+}
+
+func ensureChatToResponsesContentPart(state *ChatCompletionsToResponsesStreamState) []ResponsesStreamEvent {
+	if state.ContentPartID != "" {
+		return nil
+	}
+	state.ContentPartID = generateContentPartID()
+	return []ResponsesStreamEvent{chatToResponsesEvent(state, "response.content_part.added", &ResponsesStreamEvent{
+		OutputIndex:  0,
+		ContentIndex: 0,
+		ItemID:       state.MessageItemID,
+		Part:         responseOutputTextPart(""),
 	})}
 }
 
@@ -682,6 +737,23 @@ func (state *ChatCompletionsToResponsesStreamState) chatOutput() []ResponsesOutp
 	return outputs
 }
 
+// ChatOutput returns the accumulated Responses output for the stream state.
+func (state *ChatCompletionsToResponsesStreamState) ChatOutput() []ResponsesOutput {
+	if state == nil {
+		return nil
+	}
+	return state.chatOutput()
+}
+
+// ReasoningText returns buffered upstream reasoning content for stateful
+// Responses-to-Chat fallback history.
+func (state *ChatCompletionsToResponsesStreamState) ReasoningText() string {
+	if state == nil {
+		return ""
+	}
+	return state.Reasoning.String()
+}
+
 func chatToResponsesEvent(
 	state *ChatCompletionsToResponsesStreamState,
 	eventType string,
@@ -724,4 +796,29 @@ func nonEmpty(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func isResponsesID(id string) bool {
+	return strings.HasPrefix(strings.TrimSpace(id), "resp_")
+}
+
+func generateMessageID() string {
+	b := make([]byte, 12)
+	_, _ = rand.Read(b)
+	return "msg_" + hex.EncodeToString(b)
+}
+
+func generateContentPartID() string {
+	b := make([]byte, 12)
+	_, _ = rand.Read(b)
+	return "msgct_" + hex.EncodeToString(b)
+}
+
+func responseOutputTextPart(text string) json.RawMessage {
+	raw, _ := json.Marshal(map[string]any{
+		"type":        "output_text",
+		"text":        text,
+		"annotations": []any{},
+	})
+	return raw
 }

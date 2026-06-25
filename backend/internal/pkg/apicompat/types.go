@@ -257,12 +257,13 @@ type ResponsesTool struct {
 
 // ResponsesResponse is the non-streaming response from POST /v1/responses.
 type ResponsesResponse struct {
-	ID     string            `json:"id"`
-	Object string            `json:"object"` // "response"
-	Model  string            `json:"model"`
-	Status string            `json:"status"` // "completed" | "incomplete" | "failed"
-	Output []ResponsesOutput `json:"output"`
-	Usage  *ResponsesUsage   `json:"usage,omitempty"`
+	ID        string            `json:"id"`
+	Object    string            `json:"object"` // "response"
+	CreatedAt int64             `json:"created_at,omitempty"`
+	Model     string            `json:"model"`
+	Status    string            `json:"status"` // "completed" | "incomplete" | "failed"
+	Output    []ResponsesOutput `json:"output"`
+	Usage     *ResponsesUsage   `json:"usage,omitempty"`
 
 	// incomplete_details is present when status="incomplete"
 	IncompleteDetails *ResponsesIncompleteDetails `json:"incomplete_details,omitempty"`
@@ -389,6 +390,9 @@ type ResponsesStreamEvent struct {
 
 	// response.output_item.added / response.output_item.done
 	Item *ResponsesOutput `json:"item,omitempty"`
+
+	// response.content_part.added / response.content_part.done
+	Part json.RawMessage `json:"part,omitempty"`
 
 	// response.output_text.delta / response.output_text.done
 	OutputIndex  int    `json:"output_index,omitempty"`

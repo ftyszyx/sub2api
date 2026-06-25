@@ -344,6 +344,7 @@ func (c stubConcurrencyCache) GetAccountWaitingCount(ctx context.Context, accoun
 }
 
 type stubGatewayCache struct {
+	responsesChatStateCacheStub
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
 }

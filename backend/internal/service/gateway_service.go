@@ -441,6 +441,13 @@ type GatewayCache interface {
 	// DeleteSessionAccountID 删除粘性会话绑定，用于账号不可用时主动清理
 	// Delete sticky session binding, used to proactively clean up when account becomes unavailable
 	DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error
+
+	// GetResponsesChatState gets cached state for Responses-to-Chat fallback.
+	GetResponsesChatState(ctx context.Context, groupID int64, responseID string) ([]byte, error)
+	// SetResponsesChatState stores cached state for Responses-to-Chat fallback.
+	SetResponsesChatState(ctx context.Context, groupID int64, responseID string, data []byte, ttl time.Duration) error
+	// DeleteResponsesChatState deletes cached state for Responses-to-Chat fallback.
+	DeleteResponsesChatState(ctx context.Context, groupID int64, responseID string) error
 }
 
 // derefGroupID safely dereferences *int64 to int64, returning 0 if nil

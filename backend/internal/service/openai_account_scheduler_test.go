@@ -114,6 +114,7 @@ func (c schedulerTestConcurrencyCache) GetAccountWaitingCount(ctx context.Contex
 }
 
 type schedulerTestGatewayCache struct {
+	responsesChatStateCacheStub
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
 }

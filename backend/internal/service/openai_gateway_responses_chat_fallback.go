@@ -67,7 +67,21 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 
 	billingModel := resolveOpenAIForwardModel(account, originalModel, "")
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
-	chatReq.Model = upstreamModel
+	statefulBuild, err := s.buildStatefulResponsesChatRequest(ctx, c, account, &responsesReq, body, originalModel, upstreamModel, billingModel)
+	if err != nil {
+		writeResponsesChatFallbackError(c, err)
+		return nil, err
+	}
+	if statefulBuild != nil && statefulBuild.ChatRequest != nil {
+		chatReq = statefulBuild.ChatRequest
+	} else {
+		if strings.TrimSpace(responsesReq.PreviousResponseID) != "" {
+			err := fmt.Errorf("%w: previous_response_id requires openai_responses_chat_stateful", errResponsesChatPreviousNotFound)
+			writeResponsesChatFallbackError(c, err)
+			return nil, err
+		}
+		chatReq.Model = upstreamModel
+	}
 	if clientStream {
 		chatReq.StreamOptions = &apicompat.ChatStreamOptions{IncludeUsage: true}
 	}
@@ -199,13 +213,15 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	if clientStream {
-		return s.streamChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+		return s.streamChatCompletionsAsResponses(ctx, c, account, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, statefulBuild)
 	}
-	return s.bufferChatCompletionsAsResponses(c, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime)
+	return s.bufferChatCompletionsAsResponses(ctx, c, account, resp, originalModel, billingModel, upstreamModel, reasoningEffort, serviceTier, startTime, statefulBuild)
 }
 
 func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
+	ctx context.Context,
 	c *gin.Context,
+	account *Account,
 	resp *http.Response,
 	originalModel string,
 	billingModel string,
@@ -213,6 +229,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
+	statefulBuild *responsesChatBuildResult,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
@@ -239,10 +256,30 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		return nil, fmt.Errorf("parse chat completions response: %w", err)
 	}
 	responsesResp := apicompat.ChatCompletionsResponseToResponses(&ccResp, originalModel)
+	if statefulBuild != nil && statefulBuild.NewResponseID != "" {
+		responsesResp.ID = statefulBuild.NewResponseID
+	}
 
 	usage := OpenAIUsage{}
 	if parsed, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsed
+	}
+
+	if statefulBuild != nil {
+		assistant := assistantMessageFromChatCompletion(&ccResp)
+		if assistant != nil {
+			if err := s.finalizeResponsesChatState(ctx, c, account, responsesChatFinalizeInput{
+				BuildResult:   statefulBuild,
+				ResponseID:    responsesResp.ID,
+				Assistant:     assistant,
+				OriginalModel: originalModel,
+				UpstreamModel: upstreamModel,
+				BillingModel:  billingModel,
+			}); err != nil {
+				writeResponsesChatFallbackError(c, err)
+				return nil, err
+			}
+		}
 	}
 
 	if s.responseHeaderFilter != nil {
@@ -264,7 +301,9 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 }
 
 func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
+	ctx context.Context,
 	c *gin.Context,
+	account *Account,
 	resp *http.Response,
 	originalModel string,
 	billingModel string,
@@ -272,6 +311,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	reasoningEffort *string,
 	serviceTier *string,
 	startTime time.Time,
+	statefulBuild *responsesChatBuildResult,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	headersWritten := false
@@ -291,6 +331,9 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	state := apicompat.NewChatCompletionsToResponsesStreamState(originalModel)
+	if statefulBuild != nil && statefulBuild.NewResponseID != "" {
+		state.ResponseID = statefulBuild.NewResponseID
+	}
 	var usage OpenAIUsage
 	var firstTokenMs *int
 	clientDisconnected := false
@@ -385,6 +428,35 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 	}
 
 	writeEvents(apicompat.FinalizeChatCompletionsResponsesStream(state))
+	if statefulBuild != nil {
+		assistant := assistantMessageFromResponsesStreamState(state)
+		if assistant != nil {
+			if err := s.finalizeResponsesChatState(ctx, c, account, responsesChatFinalizeInput{
+				BuildResult:   statefulBuild,
+				ResponseID:    state.ResponseID,
+				Assistant:     assistant,
+				OriginalModel: originalModel,
+				UpstreamModel: upstreamModel,
+				BillingModel:  billingModel,
+			}); err != nil {
+				if !clientDisconnected {
+					writeResponsesChatStreamFailedEvent(c, state, "api_error", "Failed to save response state")
+				}
+				return &OpenAIForwardResult{
+					RequestID:       requestID,
+					Usage:           usage,
+					Model:           originalModel,
+					BillingModel:    billingModel,
+					UpstreamModel:   upstreamModel,
+					ReasoningEffort: reasoningEffort,
+					ServiceTier:     serviceTier,
+					Stream:          true,
+					Duration:        time.Since(startTime),
+					FirstTokenMs:    firstTokenMs,
+				}, err
+			}
+		}
+	}
 	if !clientDisconnected {
 		writeStreamHeaders()
 		if _, err := fmt.Fprint(c.Writer, "data: [DONE]\n\n"); err != nil {
@@ -412,6 +484,41 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		Duration:        time.Since(startTime),
 		FirstTokenMs:    firstTokenMs,
 	}, nil
+}
+
+func writeResponsesChatStreamFailedEvent(c *gin.Context, state *apicompat.ChatCompletionsToResponsesStreamState, errType, message string) {
+	if c == nil || c.Writer == nil {
+		return
+	}
+	responseID := ""
+	model := ""
+	if state != nil {
+		responseID = state.ResponseID
+		model = state.Model
+	}
+	if responseID == "" {
+		responseID = generateResponsesChatStateResponseID()
+	}
+	payload, err := json.Marshal(apicompat.ResponsesStreamEvent{
+		Type: "response.failed",
+		Response: &apicompat.ResponsesResponse{
+			ID:     responseID,
+			Object: "response",
+			Model:  model,
+			Status: "failed",
+			Output: []apicompat.ResponsesOutput{},
+			Error: &apicompat.ResponsesError{
+				Code:    errType,
+				Message: message,
+			},
+		},
+	})
+	if err != nil {
+		return
+	}
+	if _, err := fmt.Fprintf(c.Writer, "event: response.failed\ndata: %s\n\n", payload); err == nil {
+		c.Writer.Flush()
+	}
 }
 
 func chatChunkStartsResponsesOutput(chunk *apicompat.ChatCompletionsChunk) bool {

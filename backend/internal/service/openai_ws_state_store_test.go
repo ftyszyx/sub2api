@@ -157,6 +157,7 @@ func TestEnsureBindingCapacity_DoesNotEvictWhenUpdatingExistingKey(t *testing.T)
 }
 
 type openAIWSStateStoreTimeoutProbeCache struct {
+	responsesChatStateCacheStub
 	setHasDeadline    bool
 	getHasDeadline    bool
 	deleteHasDeadline bool

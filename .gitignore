@@ -137,3 +137,5 @@ frontend/coverage/
 aicodex
 output/
 *.pyc
+backend_next/target
+backend_next/crates/server/data/backups

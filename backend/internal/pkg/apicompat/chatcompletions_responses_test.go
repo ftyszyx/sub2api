@@ -2,6 +2,7 @@ package apicompat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -770,6 +771,191 @@ func TestResponsesToChatCompletions_NoReasoningTokensWhenZero(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(raw), "completion_tokens_details")
 	assert.NotContains(t, string(raw), "reasoning_tokens")
+}
+
+func TestChatCompletionsResponseToResponses_IgnoresChatCompletionID(t *testing.T) {
+	resp := ChatCompletionsResponseToResponses(&ChatCompletionsResponse{
+		ID:    "b36dae44-313e-4f84-98f7-464a6494bd0e",
+		Model: "deepseek-v4-pro",
+		Choices: []ChatChoice{{
+			Message: ChatMessage{Role: "assistant", Content: json.RawMessage(`"hi"`)},
+		}},
+	}, "gpt-5.5")
+
+	assert.True(t, strings.HasPrefix(resp.ID, "resp_"))
+	assert.NotEqual(t, "b36dae44-313e-4f84-98f7-464a6494bd0e", resp.ID)
+}
+
+func TestChatCompletionsChunkToResponsesEvents_IgnoresChatCompletionID(t *testing.T) {
+	state := NewChatCompletionsToResponsesStreamState("deepseek-v4-pro")
+	generatedID := state.ResponseID
+	content := "hello"
+
+	events := ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{
+		ID:    "b36dae44-313e-4f84-98f7-464a6494bd0e",
+		Model: "deepseek-v4-pro",
+		Choices: []ChatChunkChoice{{
+			Index: 0,
+			Delta: ChatDelta{Content: &content},
+		}},
+	}, state)
+	events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+
+	require.NotEmpty(t, events)
+	for i := range events {
+		if events[i].Response != nil {
+			assert.Equal(t, generatedID, events[i].Response.ID)
+			assert.True(t, strings.HasPrefix(events[i].Response.ID, "resp_"))
+		}
+	}
+}
+
+func TestChatCompletionsChunkToResponsesEvents_TextContentPartLifecycle(t *testing.T) {
+	state := NewChatCompletionsToResponsesStreamState("deepseek-v4-pro")
+	content := "hello"
+
+	events := ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{
+		ID:    "chatcmpl_ignored",
+		Model: "deepseek-v4-pro",
+		Choices: []ChatChunkChoice{{
+			Index: 0,
+			Delta: ChatDelta{Content: &content},
+		}},
+	}, state)
+	events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+
+	eventTypes := make([]string, 0, len(events))
+	for i := range events {
+		eventTypes = append(eventTypes, events[i].Type)
+	}
+
+	assert.Equal(t, []string{
+		"response.created",
+		"response.in_progress",
+		"response.output_item.added",
+		"response.content_part.added",
+		"response.output_text.delta",
+		"response.output_text.done",
+		"response.content_part.done",
+		"response.output_item.done",
+		"response.completed",
+	}, eventTypes)
+
+	require.NotNil(t, events[2].Item)
+	assert.True(t, strings.HasPrefix(events[2].Item.ID, "msg_"))
+	require.NotNil(t, events[3].Part)
+	assert.JSONEq(t, `{"type":"output_text","text":"","annotations":[]}`, string(events[3].Part))
+	require.NotNil(t, events[6].Part)
+	assert.JSONEq(t, `{"type":"output_text","text":"hello","annotations":[]}`, string(events[6].Part))
+}
+
+func TestChatCompletionsChunkToResponsesEvents_ReasoningContentIsBuffered(t *testing.T) {
+	state := NewChatCompletionsToResponsesStreamState("deepseek-v4-flash")
+	reasoning := "internal reasoning"
+	content := "visible answer"
+
+	events := ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{
+		ID:    "chatcmpl_reasoning",
+		Model: "deepseek-v4-flash",
+		Choices: []ChatChunkChoice{{
+			Index: 0,
+			Delta: ChatDelta{ReasoningContent: &reasoning},
+		}},
+	}, state)
+	events = append(events, ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{
+		ID:    "chatcmpl_reasoning",
+		Model: "deepseek-v4-flash",
+		Choices: []ChatChunkChoice{{
+			Index: 0,
+			Delta: ChatDelta{Content: &content},
+		}},
+	}, state)...)
+	events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+
+	var eventTypes []string
+	var completed *ResponsesStreamEvent
+	for i := range events {
+		eventTypes = append(eventTypes, events[i].Type)
+		if events[i].Type == "response.completed" {
+			completed = &events[i]
+		}
+	}
+
+	assert.NotContains(t, eventTypes, "response.reasoning_summary_text.delta")
+	assert.Contains(t, eventTypes, "response.output_text.delta")
+
+	require.NotNil(t, completed)
+	require.NotNil(t, completed.Response)
+	require.Len(t, completed.Response.Output, 2)
+	assert.Equal(t, "reasoning", completed.Response.Output[0].Type)
+	require.Len(t, completed.Response.Output[0].Summary, 1)
+	assert.Equal(t, reasoning, completed.Response.Output[0].Summary[0].Text)
+	assert.Equal(t, "message", completed.Response.Output[1].Type)
+	require.Len(t, completed.Response.Output[1].Content, 1)
+	assert.Equal(t, content, completed.Response.Output[1].Content[0].Text)
+}
+
+func TestChatCompletionsChunkToResponsesEvents_ToolCallIsClosed(t *testing.T) {
+	state := NewChatCompletionsToResponsesStreamState("deepseek-v4-flash")
+	toolIndex := 0
+	finishReason := "tool_calls"
+
+	events := ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{
+		ID:    "chatcmpl_tool",
+		Model: "deepseek-v4-flash",
+		Choices: []ChatChunkChoice{{
+			Index: 0,
+			Delta: ChatDelta{ToolCalls: []ChatToolCall{{
+				Index: &toolIndex,
+				ID:    "call_1",
+				Type:  "function",
+				Function: ChatFunctionCall{
+					Name:      "apply_patch",
+					Arguments: `{"patch":`,
+				},
+			}}},
+		}},
+	}, state)
+	events = append(events, ChatCompletionsChunkToResponsesEvents(&ChatCompletionsChunk{
+		ID:    "chatcmpl_tool",
+		Model: "deepseek-v4-flash",
+		Choices: []ChatChunkChoice{{
+			Index: 0,
+			Delta: ChatDelta{ToolCalls: []ChatToolCall{{
+				Index: &toolIndex,
+				Function: ChatFunctionCall{
+					Arguments: `"demo"}`,
+				},
+			}}},
+			FinishReason: &finishReason,
+		}},
+	}, state)...)
+	events = append(events, FinalizeChatCompletionsResponsesStream(state)...)
+
+	var eventTypes []string
+	var doneArgs string
+	var completed *ResponsesStreamEvent
+	for i := range events {
+		eventTypes = append(eventTypes, events[i].Type)
+		if events[i].Type == "response.function_call_arguments.done" {
+			doneArgs = events[i].Arguments
+		}
+		if events[i].Type == "response.completed" {
+			completed = &events[i]
+		}
+	}
+
+	assert.Contains(t, eventTypes, "response.output_item.added")
+	assert.Contains(t, eventTypes, "response.function_call_arguments.delta")
+	assert.Contains(t, eventTypes, "response.function_call_arguments.done")
+	assert.Contains(t, eventTypes, "response.output_item.done")
+	assert.Equal(t, `{"patch":"demo"}`, doneArgs)
+
+	require.NotNil(t, completed)
+	require.NotNil(t, completed.Response)
+	require.Len(t, completed.Response.Output, 1)
+	assert.Equal(t, "function_call", completed.Response.Output[0].Type)
+	assert.Equal(t, `{"patch":"demo"}`, completed.Response.Output[0].Arguments)
 }
 
 func TestResponsesToChatCompletions_WebSearch(t *testing.T) {

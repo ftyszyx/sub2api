@@ -253,6 +253,7 @@ var _ GroupRepository = (*mockGroupRepoForGemini)(nil)
 
 // mockGatewayCacheForGemini Gemini 测试用的 cache mock
 type mockGatewayCacheForGemini struct {
+	responsesChatStateCacheStub
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
 }

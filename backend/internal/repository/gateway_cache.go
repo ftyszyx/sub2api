@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 )
 
 const stickySessionPrefix = "sticky_session:"
+const responsesChatStatePrefix = "openai:responses_chat_state:"
 
 type gatewayCache struct {
 	rdb *redis.Client
@@ -23,6 +25,10 @@ func NewGatewayCache(rdb *redis.Client) service.GatewayCache {
 // 格式: sticky_session:{groupID}:{sessionHash}
 func buildSessionKey(groupID int64, sessionHash string) string {
 	return fmt.Sprintf("%s%d:%s", stickySessionPrefix, groupID, sessionHash)
+}
+
+func buildResponsesChatStateKey(groupID int64, responseID string) string {
+	return fmt.Sprintf("%s%d:%s", responsesChatStatePrefix, groupID, responseID)
 }
 
 func (c *gatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
@@ -49,5 +55,24 @@ func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, ses
 // or unschedulable), allowing subsequent requests to select a new available account.
 func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
 	key := buildSessionKey(groupID, sessionHash)
+	return c.rdb.Del(ctx, key).Err()
+}
+
+func (c *gatewayCache) GetResponsesChatState(ctx context.Context, groupID int64, responseID string) ([]byte, error) {
+	key := buildResponsesChatStateKey(groupID, responseID)
+	data, err := c.rdb.Get(ctx, key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, service.ErrResponsesChatPreviousNotFound
+	}
+	return data, err
+}
+
+func (c *gatewayCache) SetResponsesChatState(ctx context.Context, groupID int64, responseID string, data []byte, ttl time.Duration) error {
+	key := buildResponsesChatStateKey(groupID, responseID)
+	return c.rdb.Set(ctx, key, data, ttl).Err()
+}
+
+func (c *gatewayCache) DeleteResponsesChatState(ctx context.Context, groupID int64, responseID string) error {
+	key := buildResponsesChatStateKey(groupID, responseID)
 	return c.rdb.Del(ctx, key).Err()
 }

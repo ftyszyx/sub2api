@@ -200,6 +200,7 @@ var _ AccountRepository = (*mockAccountRepoForPlatform)(nil)
 
 // mockGatewayCacheForPlatform 单平台测试用的 cache mock
 type mockGatewayCacheForPlatform struct {
+	responsesChatStateCacheStub
 	sessionBindings map[string]int64
 	deletedSessions map[string]int
 }
