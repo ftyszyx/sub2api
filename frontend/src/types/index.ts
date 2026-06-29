@@ -97,6 +97,7 @@ export interface User {
   last_active_at?: string | null
   created_at: string
   updated_at: string
+  deleted_at?: string | null
 }
 
 export interface AdminUser extends User {
@@ -232,7 +233,9 @@ export interface PublicSettings {
   channel_monitor_enabled: boolean
   channel_monitor_default_interval_seconds: number
   available_channels_enabled: boolean
+  service_quota_enabled: boolean
   affiliate_enabled: boolean
+  allow_user_view_error_requests?: boolean
 }
 
 export interface AuthResponse {
@@ -484,7 +487,7 @@ export interface PaginationConfig {
 
 // ==================== API Key & Group Types ====================
 
-export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity'
+export type GroupPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok'
 
 export type SubscriptionType = 'standard' | 'subscription'
 
@@ -687,7 +690,7 @@ export interface UpdateGroupRequest {
 
 // ==================== Account & Proxy Types ====================
 
-export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity'
+export type AccountPlatform = 'anthropic' | 'openai' | 'gemini' | 'antigravity' | 'grok'
 export type AccountType = 'oauth' | 'setup-token' | 'apikey' | 'upstream' | 'bedrock' | 'service_account'
 export type OAuthAddMethod = 'oauth' | 'setup-token'
 export type ProxyProtocol = 'http' | 'https' | 'socks5' | 'socks5h'
@@ -708,7 +711,7 @@ export interface Proxy {
   port: number
   username: string | null
   password?: string | null
-  status: 'active' | 'inactive'
+  status: 'active' | 'inactive' | 'expired'
   account_count?: number // Number of accounts using this proxy
   latency_ms?: number
   latency_status?: 'success' | 'failed'
@@ -723,6 +726,10 @@ export interface Proxy {
   quality_grade?: string
   quality_summary?: string
   quality_checked?: number
+  expires_at: string | null
+  fallback_mode: 'none' | 'proxy' | 'direct'
+  backup_proxy_id?: number | null
+  expiry_warn_days: number
   created_at: string
   updated_at: string
 }
@@ -828,6 +835,8 @@ export interface Account {
     antigravity_credits_overages?: Record<string, { activated_at: string; active_until: string }>
   } & Record<string, unknown>)
   proxy_id: number | null
+  proxy_fallback_origin_id?: number | null
+  proxy_fallback_origin_name?: string | null
   concurrency: number
   load_factor?: number | null
   current_concurrency?: number // Real-time concurrency count from Redis
@@ -935,6 +944,13 @@ export interface AntigravityModelQuota {
   reset_time: string  // 重置时间 ISO8601
 }
 
+export interface GrokQuotaWindow {
+  limit?: number
+  remaining?: number
+  reset_unix?: number
+  reset_at?: string
+}
+
 export interface AccountUsageInfo {
   source?: 'passive' | 'active'
   updated_at: string | null
@@ -948,6 +964,15 @@ export interface AccountUsageInfo {
   gemini_pro_minute?: UsageProgress | null
   gemini_flash_minute?: UsageProgress | null
   antigravity_quota?: Record<string, AntigravityModelQuota> | null
+  grok_request_quota?: GrokQuotaWindow | null
+  grok_token_quota?: GrokQuotaWindow | null
+  grok_retry_after_seconds?: number | null
+  grok_entitlement_status?: string
+  grok_quota_snapshot_state?: string
+  grok_last_quota_probe_at?: string
+  grok_last_headers_seen_at?: string
+  grok_last_status_code?: number
+  grok_local_usage?: WindowStats | null
   ai_credits?: Array<{
     credit_type?: string
     amount?: number
@@ -1078,6 +1103,10 @@ export interface CreateProxyRequest {
   port: number
   username?: string | null
   password?: string | null
+  expires_at?: number | null   // unix 秒；null/0 = 永不过期
+  fallback_mode?: 'none' | 'proxy' | 'direct'
+  backup_proxy_id?: number | null
+  expiry_warn_days?: number
 }
 
 export interface UpdateProxyRequest {
@@ -1088,6 +1117,10 @@ export interface UpdateProxyRequest {
   username?: string | null
   password?: string | null
   status?: 'active' | 'inactive'
+  expires_at?: number | null   // unix 秒；null/0 = 永不过期
+  fallback_mode?: 'none' | 'proxy' | 'direct'
+  backup_proxy_id?: number | null
+  expiry_warn_days?: number
 }
 
 export interface AdminDataPayload {
@@ -1160,6 +1193,24 @@ export interface CodexSessionImportRequest {
   confirm_mixed_channel_risk?: boolean
 }
 
+export interface OpenAICodexPATCreateRequest {
+  access_token: string
+  name?: string
+  notes?: string | null
+  group_ids?: number[]
+  proxy_id?: number | null
+  concurrency?: number
+  priority?: number
+  rate_multiplier?: number
+  load_factor?: number | null
+  expires_at?: number | null
+  auto_pause_on_expired?: boolean
+  credential_extras?: Record<string, unknown>
+  extra?: Record<string, unknown>
+  skip_default_group_bind?: boolean
+  confirm_mixed_channel_risk?: boolean
+}
+
 export interface CodexSessionImportMessage {
   index: number
   name?: string
@@ -1188,7 +1239,7 @@ export interface CodexSessionImportResult {
 // ==================== Usage & Redeem Types ====================
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
-export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2'
+export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
@@ -1226,7 +1277,7 @@ export interface UsageLog {
   request_type?: UsageRequestType
   stream: boolean
   openai_ws_mode?: boolean
-  duration_ms: number
+  duration_ms: number | null
   first_token_ms: number | null
 
   // 图片生成字段
@@ -1236,6 +1287,8 @@ export interface UsageLog {
   image_output_size: string | null
   image_size_source: ImageSizeSource | null
   image_size_breakdown: ImageSizeBreakdown | null
+  image_output_tokens: number
+  image_output_cost: number
 
   // User-Agent
   user_agent: string | null
@@ -1410,6 +1463,8 @@ export interface UsageStatsResponse {
   total_input_tokens: number
   total_output_tokens: number
   total_cache_tokens: number
+  total_cache_read_tokens: number
+  total_cache_creation_tokens: number
   total_tokens: number
   total_cost: number // 标准计费
   total_actual_cost: number // 实际扣除
@@ -1592,6 +1647,36 @@ export interface ExtendSubscriptionRequest {
 }
 
 // ==================== Query Parameters ====================
+
+export interface UserErrorRequest {
+  id: number
+  created_at: string
+  model: string
+  inbound_endpoint: string
+  status_code: number
+  category: string
+  platform: string
+  message: string
+  key_name: string
+  key_deleted: boolean
+}
+
+export interface UserErrorRequestDetail extends UserErrorRequest {
+  error_body: string
+  upstream_status_code?: number
+}
+
+export interface UserErrorListParams {
+  page?: number
+  page_size?: number
+  start_date?: string
+  end_date?: string
+  timezone?: string
+  model?: string
+  status_code?: number
+  category?: string
+  api_key_id?: number
+}
 
 export interface UsageQueryParams {
   page?: number

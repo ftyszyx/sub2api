@@ -643,6 +643,10 @@ type ProxyProbeConfig struct {
 
 type BillingConfig struct {
 	CircuitBreaker CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	// MinimumBalanceReserve is the conservative preflight floor for balance billing.
+	// Requests in balance mode are rejected when the cached balance is below this
+	// amount, even if it is still positive. Set to 0 to keep the legacy balance > 0 gate.
+	MinimumBalanceReserve float64 `mapstructure:"minimum_balance_reserve"`
 	// UserPlatformQuotaCacheTTLSeconds 用户 × 平台 quota 缓存 TTL（秒），默认 86400=1天，覆盖典型 daily 窗口。
 	// 消费点：
 	//   - billing_cache_service.cacheWriteWorker 异步累加
@@ -719,6 +723,8 @@ type GatewayConfig struct {
 	OpenAIPassthroughAllowTimeoutHeaders bool `mapstructure:"openai_passthrough_allow_timeout_headers"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
+	// OpenAIScheduler: OpenAI 高级调度器粘性逃逸配置
+	OpenAIScheduler GatewayOpenAISchedulerConfig `mapstructure:"openai_scheduler"`
 	// OpenAIHTTP2: OpenAI HTTP 上游协议策略（默认启用 HTTP/2，可按代理能力回退 HTTP/1.1）
 	OpenAIHTTP2 GatewayOpenAIHTTP2Config `mapstructure:"openai_http2"`
 	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
@@ -885,6 +891,12 @@ type GatewayOpenAIWSConfig struct {
 	StoreDisabledForceNewConn bool `mapstructure:"store_disabled_force_new_conn"`
 	// PrewarmGenerateEnabled: 是否启用 WSv2 generate=false 预热（默认 false）
 	PrewarmGenerateEnabled bool `mapstructure:"prewarm_generate_enabled"`
+	// ClientReadLimitBytes: 入站客户端 WS 单帧读取上限。
+	ClientReadLimitBytes int64 `mapstructure:"client_read_limit_bytes"`
+	// HTTPBridgeEnabled: 首包过大时，保持客户端 WS，改用 HTTP Responses 上游。
+	HTTPBridgeEnabled bool `mapstructure:"http_bridge_enabled"`
+	// HTTPBridgeThresholdBytes: 触发 HTTP bridge 的入站 WS payload 阈值。
+	HTTPBridgeThresholdBytes int64 `mapstructure:"http_bridge_threshold_bytes"`
 
 	// Feature 开关：v2 优先于 v1
 	ResponsesWebsockets   bool `mapstructure:"responses_websockets"`
@@ -949,6 +961,21 @@ type GatewayOpenAIWSSchedulerScoreWeights struct {
 	Queue     float64 `mapstructure:"queue"`
 	ErrorRate float64 `mapstructure:"error_rate"`
 	TTFT      float64 `mapstructure:"ttft"`
+	// Reset 倾向「会话窗口最早重置」的账号（use-it-or-lose-it）。
+	// >0 时，剩余重置时间越短的账号得分越高，从而被优先用尽。默认 0（关闭，不改变原有行为）。
+	Reset float64 `mapstructure:"reset"`
+	// QuotaHeadroom 倾向 7d 剩余额度更健康的账号；默认 0（关闭，不改变原有行为）。
+	QuotaHeadroom float64 `mapstructure:"quota_headroom"`
+}
+
+// GatewayOpenAISchedulerConfig OpenAI 高级调度器配置。
+type GatewayOpenAISchedulerConfig struct {
+	// StickyEscapeEnabled: 是否允许 session_hash sticky 在账号健康度劣化时临时逃逸
+	StickyEscapeEnabled bool `mapstructure:"sticky_escape_enabled"`
+	// StickyEscapeTTFTMs: TTFT EWMA 超过该阈值时跳过 sticky
+	StickyEscapeTTFTMs int `mapstructure:"sticky_escape_ttft_ms"`
+	// StickyEscapeErrorRate: 错误率 EWMA 超过该阈值时跳过 sticky
+	StickyEscapeErrorRate float64 `mapstructure:"sticky_escape_error_rate"`
 }
 
 // GatewayUsageRecordConfig 使用量记录异步队列配置
@@ -1036,6 +1063,11 @@ type GatewaySchedulingConfig struct {
 
 	// 兜底层账户选择策略: "last_used"(按最后使用时间排序，默认) 或 "random"(随机)
 	FallbackSelectionMode string `mapstructure:"fallback_selection_mode"`
+
+	// PreferSoonestReset 开启后，负载感知选择会优先选用「会话窗口最早重置」的账号
+	// （use-it-or-lose-it：先用尽即将重置的账号，保留重置时间还很久的账号）。
+	// 默认 false，保持原有「优先级 → 负载率 → LRU」行为不变。
+	PreferSoonestReset bool `mapstructure:"prefer_soonest_reset"`
 
 	// 负载计算
 	LoadBatchEnabled    bool `mapstructure:"load_batch_enabled"`
@@ -1379,6 +1411,15 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config error: %w", err)
 	}
+	if cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs == 0 {
+		cfg.Gateway.OpenAIScheduler.StickyEscapeTTFTMs = 15000
+	}
+	if cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate == 0 {
+		cfg.Gateway.OpenAIScheduler.StickyEscapeErrorRate = 0.5
+	}
+	if !cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled && !viper.IsSet("gateway.openai_scheduler.sticky_escape_enabled") {
+		cfg.Gateway.OpenAIScheduler.StickyEscapeEnabled = true
+	}
 
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
@@ -1580,6 +1621,7 @@ func setDefaults() {
 	viper.SetDefault("billing.circuit_breaker.failure_threshold", 5)
 	viper.SetDefault("billing.circuit_breaker.reset_timeout_seconds", 30)
 	viper.SetDefault("billing.circuit_breaker.half_open_requests", 3)
+	viper.SetDefault("billing.minimum_balance_reserve", 0.000001)
 	viper.SetDefault("billing.user_platform_quota_cache_ttl_seconds", 86400)
 	viper.SetDefault("billing.user_platform_quota_sentinel_ttl_seconds", 3600)
 
@@ -1806,6 +1848,9 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.store_disabled_conn_mode", "strict")
 	viper.SetDefault("gateway.openai_ws.store_disabled_force_new_conn", true)
 	viper.SetDefault("gateway.openai_ws.prewarm_generate_enabled", false)
+	viper.SetDefault("gateway.openai_ws.client_read_limit_bytes", 64*1024*1024)
+	viper.SetDefault("gateway.openai_ws.http_bridge_enabled", true)
+	viper.SetDefault("gateway.openai_ws.http_bridge_threshold_bytes", 15*1024*1024)
 	viper.SetDefault("gateway.openai_ws.responses_websockets", false)
 	viper.SetDefault("gateway.openai_ws.responses_websockets_v2", true)
 	viper.SetDefault("gateway.openai_ws.max_conns_per_account", 128)
@@ -1840,6 +1885,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.queue", 0.7)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.error_rate", 0.8)
 	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.ttft", 0.5)
+	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.reset", 0.0)
+	viper.SetDefault("gateway.openai_ws.scheduler_score_weights.quota_headroom", 0.0)
 	// OpenAI HTTP upstream protocol strategy
 	viper.SetDefault("gateway.openai_http2.enabled", true)
 	viper.SetDefault("gateway.openai_http2.allow_proxy_fallback_to_http1", true)
@@ -1876,6 +1923,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.scheduling.fallback_wait_timeout", 30*time.Second)
 	viper.SetDefault("gateway.scheduling.fallback_max_waiting", 100)
 	viper.SetDefault("gateway.scheduling.fallback_selection_mode", "last_used")
+	viper.SetDefault("gateway.scheduling.prefer_soonest_reset", false)
 	viper.SetDefault("gateway.scheduling.load_batch_enabled", true)
 	viper.SetDefault("gateway.scheduling.load_batch_cache_ttl_ms", 200)
 	viper.SetDefault("gateway.scheduling.snapshot_mget_chunk_size", 128)
@@ -2237,6 +2285,9 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("billing.circuit_breaker.half_open_requests must be positive")
 		}
 	}
+	if c.Billing.MinimumBalanceReserve < 0 {
+		return fmt.Errorf("billing.minimum_balance_reserve must be non-negative")
+	}
 	if c.Database.MaxOpenConns <= 0 {
 		return fmt.Errorf("database.max_open_conns must be positive")
 	}
@@ -2543,6 +2594,15 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIWS.PrewarmCooldownMS < 0 {
 		return fmt.Errorf("gateway.openai_ws.prewarm_cooldown_ms must be non-negative")
 	}
+	if c.Gateway.OpenAIWS.ClientReadLimitBytes <= 0 {
+		return fmt.Errorf("gateway.openai_ws.client_read_limit_bytes must be positive")
+	}
+	if c.Gateway.OpenAIWS.HTTPBridgeThresholdBytes < 0 {
+		return fmt.Errorf("gateway.openai_ws.http_bridge_threshold_bytes must be non-negative")
+	}
+	if c.Gateway.OpenAIWS.HTTPBridgeEnabled && c.Gateway.OpenAIWS.HTTPBridgeThresholdBytes == 0 {
+		return fmt.Errorf("gateway.openai_ws.http_bridge_threshold_bytes must be positive when http_bridge_enabled is true")
+	}
 	if c.Gateway.OpenAIWS.FallbackCooldownSeconds < 0 {
 		return fmt.Errorf("gateway.openai_ws.fallback_cooldown_seconds must be non-negative")
 	}
@@ -2606,16 +2666,24 @@ func (c *Config) Validate() error {
 		c.Gateway.OpenAIWS.SchedulerScoreWeights.Load < 0 ||
 		c.Gateway.OpenAIWS.SchedulerScoreWeights.Queue < 0 ||
 		c.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate < 0 ||
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT < 0 {
+		c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT < 0 ||
+		c.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom < 0 {
 		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights.* must be non-negative")
 	}
 	weightSum := c.Gateway.OpenAIWS.SchedulerScoreWeights.Priority +
 		c.Gateway.OpenAIWS.SchedulerScoreWeights.Load +
 		c.Gateway.OpenAIWS.SchedulerScoreWeights.Queue +
 		c.Gateway.OpenAIWS.SchedulerScoreWeights.ErrorRate +
-		c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT
+		c.Gateway.OpenAIWS.SchedulerScoreWeights.TTFT +
+		c.Gateway.OpenAIWS.SchedulerScoreWeights.QuotaHeadroom
 	if weightSum <= 0 {
 		return fmt.Errorf("gateway.openai_ws.scheduler_score_weights must not all be zero")
+	}
+	if c.Gateway.OpenAIScheduler.StickyEscapeTTFTMs <= 0 {
+		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_ttft_ms must be positive")
+	}
+	if c.Gateway.OpenAIScheduler.StickyEscapeErrorRate < 0 || c.Gateway.OpenAIScheduler.StickyEscapeErrorRate > 1 {
+		return fmt.Errorf("gateway.openai_scheduler.sticky_escape_error_rate must be between 0 and 1")
 	}
 	if c.Gateway.MaxLineSize < 0 {
 		return fmt.Errorf("gateway.max_line_size must be non-negative")

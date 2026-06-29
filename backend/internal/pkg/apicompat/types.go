@@ -391,9 +391,6 @@ type ResponsesStreamEvent struct {
 	// response.output_item.added / response.output_item.done
 	Item *ResponsesOutput `json:"item,omitempty"`
 
-	// response.content_part.added / response.content_part.done
-	Part json.RawMessage `json:"part,omitempty"`
-
 	// response.output_text.delta / response.output_text.done
 	OutputIndex  int    `json:"output_index,omitempty"`
 	ContentIndex int    `json:"content_index,omitempty"`
@@ -409,6 +406,10 @@ type ResponsesStreamEvent struct {
 	// response.reasoning_summary_text.delta / done
 	// Reuses Text/Delta fields above, SummaryIndex identifies which summary part
 	SummaryIndex int `json:"summary_index,omitempty"`
+
+	// response.content_part.added / done and
+	// response.reasoning_summary_part.added / done
+	Part *ResponsesContentPart `json:"part,omitempty"`
 
 	// error event fields
 	Code  string `json:"code,omitempty"`

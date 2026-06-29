@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 var codexModelMap = map[string]string{
@@ -156,6 +158,12 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		}
 	}
 
+	// 请求带 reasoning 时补齐 include:["reasoning.encrypted_content"]，与真实 Codex 对齐
+	// （compact 端点形态不同，单独处理，此处跳过）。
+	if !opts.IsCompact && ensureCodexReasoningInclude(reqBody) {
+		result.Modified = true
+	}
+
 	// 兼容遗留的 functions 和 function_call，转换为 tools 和 tool_choice
 	if functionsRaw, ok := reqBody["functions"]; ok {
 		if functions, k := functionsRaw.([]any); k {
@@ -204,7 +212,9 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		}
 	}
 
-	// 提取 input 中 role:"system" 消息至 instructions（OAuth 上游不支持 system role）。
+	// ChatGPT internal Codex endpoint does not accept role:"system".
+	// Keep the guidance in input as developer for Responses JSON mode, and
+	// also mirror it into instructions because Codex OAuth requires it.
 	if extractSystemMessagesFromInput(reqBody) {
 		result.Modified = true
 	}
@@ -214,6 +224,11 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 		result.Modified = true
 	}
 	if isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
+		result.Modified = true
+	}
+	// gpt-5.3-codex-spark rejects the image_generation tool upstream (HTTP 400,
+	// param=tools); Codex CLI advertises it by default, so strip it for spark.
+	if isCodexSparkModel(normalizedModel) && stripCodexSparkImageGenerationTools(reqBody) {
 		result.Modified = true
 	}
 
@@ -594,6 +609,41 @@ func hasOpenAIImageGenerationTool(reqBody map[string]any) bool {
 	return false
 }
 
+// stripCodexSparkImageGenerationTools removes image_generation tool entries from
+// reqBody["tools"]. gpt-5.3-codex-spark rejects that tool upstream with HTTP 400
+// (invalid_request_error, param=tools), and Codex CLI advertises it by default, so
+// it must be dropped for spark. When the tools list becomes empty the key is removed.
+// Returns true when the body was modified.
+func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
+	rawTools, ok := reqBody["tools"]
+	if !ok || rawTools == nil {
+		return false
+	}
+	tools, ok := rawTools.([]any)
+	if !ok {
+		return false
+	}
+	filtered := make([]any, 0, len(tools))
+	removed := false
+	for _, rawTool := range tools {
+		if toolMap, ok := rawTool.(map[string]any); ok &&
+			strings.TrimSpace(firstNonEmptyString(toolMap["type"])) == "image_generation" {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, rawTool)
+	}
+	if !removed {
+		return false
+	}
+	if len(filtered) == 0 {
+		delete(reqBody, "tools")
+	} else {
+		reqBody["tools"] = filtered
+	}
+	return true
+}
+
 func hasOpenAIInputImage(reqBody map[string]any) bool {
 	if reqBody == nil {
 		return false
@@ -703,6 +753,20 @@ func ensureOpenAIResponsesImageGenerationTool(reqBody map[string]any) bool {
 	}
 
 	reqBody["tools"] = append(tools, tool)
+	return true
+}
+
+func ensureOpenAIResponsesImageGenerationToolChoiceAuto(reqBody map[string]any) bool {
+	if len(reqBody) == 0 || !hasOpenAIImageGenerationTool(reqBody) {
+		return false
+	}
+	if isCodexSparkModel(firstNonEmptyString(reqBody["model"])) {
+		return false
+	}
+	if _, ok := reqBody["tool_choice"]; ok {
+		return false
+	}
+	reqBody["tool_choice"] = "auto"
 	return true
 }
 
@@ -900,10 +964,10 @@ func extractTextFromContent(content any) string {
 	}
 }
 
-// extractSystemMessagesFromInput scans the input array for items with role=="system",
-// removes them, and merges their content into reqBody["instructions"].
-// If instructions is already non-empty, extracted content is prepended with "\n\n".
-// Returns true if any system messages were extracted.
+// extractSystemMessagesFromInput scans input for role=="system", maps those
+// items to developer, and mirrors their text into reqBody["instructions"].
+// It preserves the input items so Responses JSON mode can still see JSON
+// instructions in input messages.
 func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 	input, ok := reqBody["input"].([]any)
 	if !ok || len(input) == 0 {
@@ -911,25 +975,24 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 	}
 
 	var systemTexts []string
-	remaining := make([]any, 0, len(input))
-
+	modified := false
 	for _, item := range input {
 		m, ok := item.(map[string]any)
 		if !ok {
-			remaining = append(remaining, item)
 			continue
 		}
 		if role, _ := m["role"].(string); role != "system" {
-			remaining = append(remaining, item)
 			continue
 		}
+		m["role"] = "developer"
+		modified = true
 		if text := extractTextFromContent(m["content"]); text != "" {
 			systemTexts = append(systemTexts, text)
 		}
 	}
 
 	if len(systemTexts) == 0 {
-		return false
+		return modified
 	}
 
 	extracted := strings.Join(systemTexts, "\n\n")
@@ -938,7 +1001,6 @@ func extractSystemMessagesFromInput(reqBody map[string]any) bool {
 	} else {
 		reqBody["instructions"] = extracted
 	}
-	reqBody["input"] = remaining
 	return true
 }
 
@@ -964,12 +1026,94 @@ func extractPromptLikeInstructionsFromInput(reqBody map[string]any) string {
 	return strings.Join(texts, "\n\n")
 }
 
+// defaultCodexSynthInstructions 返回合成路径在 instructions 为空时应填入的默认提示词。
+//
+// 按 model 选择真实 Codex CLI 的 base instructions（codex 系→GPT-5-Codex，
+// gpt-5.2→GPT-5.2，gpt-5.1/gpt-5→GPT-5.1），使合成请求在提示词层面贴近真实 Codex 行为；
+// 若内嵌 prompt 意外为空，回退到最小占位符以保证字段非空。
+func defaultCodexSynthInstructions(model string) string {
+	if instructions := strings.TrimSpace(openai.CodexBaseInstructionsForModel(model)); instructions != "" {
+		return instructions
+	}
+	return "You are a helpful coding assistant."
+}
+
+// ensureCodexReasoningInclude 在请求带 reasoning 时补齐 include:["reasoning.encrypted_content"]。
+//
+// 真实 Codex 在 reasoning 存在时总会请求加密推理内容（ChatGPT/store=false 场景下用于上下文回放）。
+// 该函数为加法式、幂等：仅在 include 缺失或未包含该项时追加；对非数组的异常 include 不做破坏性改写。
+func ensureCodexReasoningInclude(reqBody map[string]any) bool {
+	reasoning, ok := reqBody["reasoning"].(map[string]any)
+	if !ok || len(reasoning) == 0 {
+		return false
+	}
+	const encrypted = "reasoning.encrypted_content"
+	switch existing := reqBody["include"].(type) {
+	case nil:
+		reqBody["include"] = []any{encrypted}
+		return true
+	case []any:
+		for _, v := range existing {
+			if s, ok := v.(string); ok && s == encrypted {
+				return false
+			}
+		}
+		reqBody["include"] = append(existing, encrypted)
+		return true
+	default:
+		// include 为非预期类型时保持原样，避免破坏调用方意图。
+		return false
+	}
+}
+
+// applyCodexClientMetadata 在请求体补齐 client_metadata["x-codex-installation-id"]，
+// 取值为账号真实的 openai_device_id（最新 Codex 在请求体携带的安装标识）。
+//
+// 加法式、幂等：仅在账号存在 device_id 且该键缺失时注入，绝不覆盖既有 client_metadata
+// （如 turn metadata），也不伪造——无 device_id 时不写入。
+func applyCodexClientMetadata(reqBody map[string]any, account *Account) bool {
+	if account == nil {
+		return false
+	}
+	deviceID := strings.TrimSpace(account.GetOpenAIDeviceID())
+	if deviceID == "" {
+		return false
+	}
+	const key = "x-codex-installation-id"
+	switch existing := reqBody["client_metadata"].(type) {
+	case map[string]any:
+		if v, ok := existing[key].(string); ok && strings.TrimSpace(v) != "" {
+			return false
+		}
+		existing[key] = deviceID
+		reqBody["client_metadata"] = existing
+		return true
+	case map[string]string:
+		if strings.TrimSpace(existing[key]) != "" {
+			return false
+		}
+		next := make(map[string]any, len(existing)+1)
+		for k, v := range existing {
+			next[k] = v
+		}
+		next[key] = deviceID
+		reqBody["client_metadata"] = next
+		return true
+	case nil:
+		reqBody["client_metadata"] = map[string]any{key: deviceID}
+		return true
+	default:
+		return false
+	}
+}
+
 // applyInstructions 处理 instructions 字段：仅在 instructions 为空时填充默认值。
 func applyInstructions(reqBody map[string]any, isCodexCLI bool) bool {
 	if !isInstructionsEmpty(reqBody) {
 		return false
 	}
-	reqBody["instructions"] = "You are a helpful coding assistant."
+	model, _ := reqBody["model"].(string)
+	reqBody["instructions"] = defaultCodexSynthInstructions(model)
 	return true
 }
 
