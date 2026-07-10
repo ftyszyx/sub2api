@@ -9,58 +9,62 @@ import (
 )
 
 var codexModelMap = map[string]string{
-	"gpt-5.5":                    "gpt-5.5",
-	"codex-auto-review":          "codex-auto-review",
-	"gpt-5.4":                    "gpt-5.4",
-	"gpt-5.4-mini":               "gpt-5.4-mini",
-	"gpt-5.4-none":               "gpt-5.4",
-	"gpt-5.4-low":                "gpt-5.4",
-	"gpt-5.4-medium":             "gpt-5.4",
-	"gpt-5.4-high":               "gpt-5.4",
-	"gpt-5.4-xhigh":              "gpt-5.4",
-	"gpt-5.4-chat-latest":        "gpt-5.4",
-	"gpt-5.3":                    "gpt-5.3-codex",
-	"gpt-5.3-none":               "gpt-5.3-codex",
-	"gpt-5.3-low":                "gpt-5.3-codex",
-	"gpt-5.3-medium":             "gpt-5.3-codex",
-	"gpt-5.3-high":               "gpt-5.3-codex",
-	"gpt-5.3-xhigh":              "gpt-5.3-codex",
-	"gpt-5.3-codex":              "gpt-5.3-codex",
-	"gpt-5.3-codex-spark":        "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-low":    "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-medium": "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-high":   "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-spark-xhigh":  "gpt-5.3-codex-spark",
-	"gpt-5.3-codex-low":          "gpt-5.3-codex",
-	"gpt-5.3-codex-medium":       "gpt-5.3-codex",
-	"gpt-5.3-codex-high":         "gpt-5.3-codex",
-	"gpt-5.3-codex-xhigh":        "gpt-5.3-codex",
-	"gpt-5.2":                    "gpt-5.2",
-	"gpt-5.2-none":               "gpt-5.2",
-	"gpt-5.2-low":                "gpt-5.2",
-	"gpt-5.2-medium":             "gpt-5.2",
-	"gpt-5.2-high":               "gpt-5.2",
-	"gpt-5.2-xhigh":              "gpt-5.2",
-	"gpt-5":                      "gpt-5.4",
-	"gpt-5-mini":                 "gpt-5.4",
-	"gpt-5-nano":                 "gpt-5.4",
-	"gpt-5.1":                    "gpt-5.4",
-	"gpt-5.1-codex":              "gpt-5.3-codex",
-	"gpt-5.1-codex-max":          "gpt-5.3-codex",
-	"gpt-5.1-codex-mini":         "gpt-5.3-codex",
-	"gpt-5.2-codex":              "gpt-5.2",
-	"codex-mini-latest":          "gpt-5.3-codex",
-	"gpt-5-codex":                "gpt-5.3-codex",
+	"gpt-5.6-sol":          "gpt-5.6-sol",
+	"gpt-5.6-terra":        "gpt-5.6-terra",
+	"gpt-5.6-luna":         "gpt-5.6-luna",
+	"gpt-5.5":              "gpt-5.5",
+	"gpt-5.5-pro":          "gpt-5.5-pro",
+	"codex-auto-review":    "codex-auto-review",
+	"gpt-5.4":              "gpt-5.4",
+	"gpt-5.4-mini":         "gpt-5.4-mini",
+	"gpt-5.4-none":         "gpt-5.4",
+	"gpt-5.4-low":          "gpt-5.4",
+	"gpt-5.4-medium":       "gpt-5.4",
+	"gpt-5.4-high":         "gpt-5.4",
+	"gpt-5.4-xhigh":        "gpt-5.4",
+	"gpt-5.4-chat-latest":  "gpt-5.4",
+	"gpt-5.3":              "gpt-5.3-codex",
+	"gpt-5.3-none":         "gpt-5.3-codex",
+	"gpt-5.3-low":          "gpt-5.3-codex",
+	"gpt-5.3-medium":       "gpt-5.3-codex",
+	"gpt-5.3-high":         "gpt-5.3-codex",
+	"gpt-5.3-xhigh":        "gpt-5.3-codex",
+	"gpt-5.3-codex":        "gpt-5.3-codex",
+	"gpt-5.3-codex-spark":  "gpt-5.3-codex-spark",
+	"gpt-5.3-codex-low":    "gpt-5.3-codex",
+	"gpt-5.3-codex-medium": "gpt-5.3-codex",
+	"gpt-5.3-codex-high":   "gpt-5.3-codex",
+	"gpt-5.3-codex-xhigh":  "gpt-5.3-codex",
+	"gpt-5.2":              "gpt-5.2",
+	"gpt-5.2-none":         "gpt-5.2",
+	"gpt-5.2-low":          "gpt-5.2",
+	"gpt-5.2-medium":       "gpt-5.2",
+	"gpt-5.2-high":         "gpt-5.2",
+	"gpt-5.2-xhigh":        "gpt-5.2",
+	"gpt-5":                "gpt-5.4",
+	"gpt-5-mini":           "gpt-5.4",
+	"gpt-5-nano":           "gpt-5.4",
+	"gpt-5.1":              "gpt-5.4",
+	"gpt-5.1-codex":        "gpt-5.3-codex",
+	"gpt-5.1-codex-max":    "gpt-5.3-codex",
+	"gpt-5.1-codex-mini":   "gpt-5.3-codex",
+	"gpt-5.2-codex":        "gpt-5.2",
+	"codex-mini-latest":    "gpt-5.3-codex",
+	"gpt-5-codex":          "gpt-5.3-codex",
 }
 
 var codexVersionModelPrefixes = []struct {
 	prefix string
 	target string
 }{
+	{prefix: "gpt-5.6-sol", target: "gpt-5.6-sol"},
+	{prefix: "gpt-5.6-terra", target: "gpt-5.6-terra"},
+	{prefix: "gpt-5.6-luna", target: "gpt-5.6-luna"},
 	{prefix: "gpt-5.3-codex-spark", target: "gpt-5.3-codex-spark"},
 	{prefix: "gpt-5.3-codex", target: "gpt-5.3-codex"},
 	{prefix: "gpt-5.4-mini", target: "gpt-5.4-mini"},
 	{prefix: "gpt-5.4-nano", target: "gpt-5.4-nano"},
+	{prefix: "gpt-5.5-pro", target: "gpt-5.5-pro"},
 	{prefix: "gpt-5.5", target: "gpt-5.5"},
 	{prefix: "gpt-5.4", target: "gpt-5.4"},
 	{prefix: "gpt-5.2", target: "gpt-5.2"},
@@ -589,8 +593,14 @@ func isCodexSparkModel(model string) bool {
 }
 
 func hasOpenAIImageGenerationTool(reqBody map[string]any) bool {
-	rawTools, ok := reqBody["tools"]
-	if !ok || rawTools == nil {
+	if toolsContainImageGeneration(reqBody["tools"]) {
+		return true
+	}
+	return inputContainsImageGenNamespace(reqBody["input"])
+}
+
+func toolsContainImageGeneration(rawTools any) bool {
+	if rawTools == nil {
 		return false
 	}
 	tools, ok := rawTools.([]any)
@@ -605,22 +615,53 @@ func hasOpenAIImageGenerationTool(reqBody map[string]any) bool {
 		if strings.TrimSpace(firstNonEmptyString(toolMap["type"])) == "image_generation" {
 			return true
 		}
+		if isImageGenNamespaceToolMap(toolMap) {
+			return true
+		}
 	}
 	return false
 }
 
-// stripCodexSparkImageGenerationTools removes image_generation tool entries from
-// reqBody["tools"]. gpt-5.3-codex-spark rejects that tool upstream with HTTP 400
-// (invalid_request_error, param=tools), and Codex CLI advertises it by default, so
-// it must be dropped for spark. When the tools list becomes empty the key is removed.
-// Returns true when the body was modified.
-func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
+func isImageGenNamespaceToolMap(tool map[string]any) bool {
+	return strings.TrimSpace(firstNonEmptyString(tool["type"])) == "namespace" &&
+		strings.TrimSpace(firstNonEmptyString(tool["name"])) == "image_gen"
+}
+
+func inputContainsImageGenNamespace(rawInput any) bool {
+	input, ok := rawInput.([]any)
+	if !ok {
+		return false
+	}
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(firstNonEmptyString(item["type"])) != "additional_tools" {
+			continue
+		}
+		if toolsContainImageGeneration(item["tools"]) {
+			return true
+		}
+	}
+	return false
+}
+
+func stripOpenAIImageGenerationTools(reqBody map[string]any) bool {
 	rawTools, ok := reqBody["tools"]
 	if !ok || rawTools == nil {
+		if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+			delete(reqBody, "tool_choice")
+			return true
+		}
 		return false
 	}
 	tools, ok := rawTools.([]any)
 	if !ok {
+		if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+			delete(reqBody, "tool_choice")
+			return true
+		}
 		return false
 	}
 	filtered := make([]any, 0, len(tools))
@@ -633,15 +674,29 @@ func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
 		}
 		filtered = append(filtered, rawTool)
 	}
-	if !removed {
+	if !removed && !openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
 		return false
 	}
-	if len(filtered) == 0 {
-		delete(reqBody, "tools")
-	} else {
-		reqBody["tools"] = filtered
+	if removed {
+		if len(filtered) == 0 {
+			delete(reqBody, "tools")
+		} else {
+			reqBody["tools"] = filtered
+		}
+	}
+	if openAIAnyToolChoiceSelectsImageGeneration(reqBody["tool_choice"]) {
+		delete(reqBody, "tool_choice")
 	}
 	return true
+}
+
+// stripCodexSparkImageGenerationTools removes image_generation tool entries from
+// reqBody["tools"]. gpt-5.3-codex-spark rejects that tool upstream with HTTP 400
+// (invalid_request_error, param=tools), and Codex CLI advertises it by default, so
+// it must be dropped for spark. When the tools list becomes empty the key is removed.
+// Returns true when the body was modified.
+func stripCodexSparkImageGenerationTools(reqBody map[string]any) bool {
+	return stripOpenAIImageGenerationTools(reqBody)
 }
 
 func hasOpenAIInputImage(reqBody map[string]any) bool {
@@ -1157,11 +1212,41 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		}
 		typ, _ := m["type"].(string)
 
-		// chatgpt.com codex backend (OAuth path) does not persist reasoning
-		// items because applyCodexOAuthTransform forces store=false. Any rs_*
-		// reference replayed in input is guaranteed to 404 upstream
-		// ("Item with id 'rs_...' not found"). Drop reasoning items entirely.
+		// chatgpt.com codex (OAuth path) runs with store=false (forced by
+		// applyCodexOAuthTransform). Replaying a reasoning item with its rs_*
+		// id but no encrypted_content 404s upstream ("Item with id 'rs_...'
+		// not found") — the 404 is triggered by the id lookup, not by the
+		// reasoning item itself. So strip the id (always, independent of
+		// PreserveReferences) yet keep the item: under store=false
+		// encrypted_content is the official channel for carrying reasoning
+		// context across turns, and dropping the whole item silently degrades
+		// multi-turn agent reasoning. Preserve encrypted_content/content/
+		// summary and every other field verbatim. Upstream additionally
+		// requires a summary field — a missing one is rejected with 400
+		// "Missing required parameter 'input[N].summary'" — so backfill an
+		// empty array when it is absent. Contracts verified end-to-end against
+		// chatgpt.com codex (gpt-5.5); see issue #1957.
+		// compaction_summary items (cmp_*) are the other encrypted_content
+		// carrier. Verified against the live backend: they require
+		// encrypted_content (a missing one is rejected with 400), and with it
+		// present the cmp_* id does not 404 whether kept or stripped. Being
+		// neither reasoning nor tool calls, they flow through the generic path
+		// below (id stripped when !PreserveReferences, encrypted_content
+		// preserved either way), which is safe and needs no special-casing.
 		if typ == "reasoning" {
+			newItem := make(map[string]any, len(m))
+			for key, value := range m {
+				if key == "id" {
+					// rs_* id replayed under store=false 404s; strip it.
+					continue
+				}
+				newItem[key] = value
+			}
+			if summary, ok := newItem["summary"]; !ok || summary == nil {
+				// Upstream requires a summary field; an empty array satisfies it.
+				newItem["summary"] = []any{}
+			}
+			filtered = append(filtered, newItem)
 			continue
 		}
 
@@ -1252,6 +1337,16 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 		if !opts.PreserveReferences {
 			ensureCopy()
 			delete(newItem, "id")
+		} else if isCodexToolCallInputType(typ) {
+			// 续链模式下保留 id 以维持上下文引用，但 function_call 等
+			// call-input 类 item 的 id 必须以 "fc" 开头（上游校验
+			// "Expected an ID that begins with 'fc'"）。item_* 形式的 id
+			// 来自客户端回放，需要删除。
+			// 注意：function_call_output 等 output 类的 id 无此约束，不动。
+			if id, ok := m["id"].(string); ok && id != "" && !strings.HasPrefix(id, "fc") {
+				ensureCopy()
+				delete(newItem, "id")
+			}
 		}
 
 		filtered = append(filtered, newItem)
@@ -1271,6 +1366,22 @@ func isCodexToolCallItemType(typ string) bool {
 		"mcp_tool_call_output",
 		"custom_tool_call_output",
 		"tool_search_output":
+		return true
+	default:
+		return false
+	}
+}
+
+// isCodexToolCallInputType 仅匹配 call-input 类型（不含 output），这些类型的
+// id 必须以 "fc" 开头，上游会校验 "Expected an ID that begins with 'fc'."。
+func isCodexToolCallInputType(typ string) bool {
+	switch typ {
+	case "function_call",
+		"tool_call",
+		"local_shell_call",
+		"tool_search_call",
+		"custom_tool_call",
+		"mcp_tool_call":
 		return true
 	default:
 		return false

@@ -184,6 +184,23 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultOpenAICompactModel(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.4", cfg.Gateway.OpenAICompactModel)
+}
+
+func TestLoadOpenAICompactModelFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("GATEWAY_OPENAI_COMPACT_MODEL", "gpt-5.3-codex")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.3-codex", cfg.Gateway.OpenAICompactModel)
+}
+
 func TestLoadDefaultOpenAIHTTP2Enabled(t *testing.T) {
 	resetViperWithJWTSecret(t)
 
@@ -251,6 +268,14 @@ func TestLoadDefaultIdempotencyConfig(t *testing.T) {
 	if cfg.Idempotency.SystemOperationTTLSeconds != 3600 {
 		t.Fatalf("Idempotency.SystemOperationTTLSeconds = %d, want 3600", cfg.Idempotency.SystemOperationTTLSeconds)
 	}
+}
+
+func TestLoadDefaultBatchImageQueueDisabled(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.BatchImage.QueueEnabled)
 }
 
 func TestLoadIdempotencyConfigFromEnv(t *testing.T) {
@@ -1678,7 +1703,7 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 			wantErr: "gateway.openai_ws.store_disabled_conn_mode",
 		},
 		{
-			name:    "ingress_mode_default 必须为 off|ctx_pool|passthrough",
+			name:    "ingress_mode_default 必须为 off|ctx_pool|passthrough|http_bridge",
 			mutate:  func(c *Config) { c.Gateway.OpenAIWS.IngressModeDefault = "invalid" },
 			wantErr: "gateway.openai_ws.ingress_mode_default",
 		},
@@ -1886,8 +1911,8 @@ func TestLoad_DefaultGatewayUsageRecordConfig(t *testing.T) {
 	if cfg.Gateway.UsageRecord.TaskTimeoutSeconds != 5 {
 		t.Fatalf("task_timeout_seconds = %d, want 5", cfg.Gateway.UsageRecord.TaskTimeoutSeconds)
 	}
-	if cfg.Gateway.UsageRecord.OverflowPolicy != UsageRecordOverflowPolicySample {
-		t.Fatalf("overflow_policy = %s, want %s", cfg.Gateway.UsageRecord.OverflowPolicy, UsageRecordOverflowPolicySample)
+	if cfg.Gateway.UsageRecord.OverflowPolicy != UsageRecordOverflowPolicySync {
+		t.Fatalf("overflow_policy = %s, want %s", cfg.Gateway.UsageRecord.OverflowPolicy, UsageRecordOverflowPolicySync)
 	}
 	if cfg.Gateway.UsageRecord.OverflowSamplePercent != 10 {
 		t.Fatalf("overflow_sample_percent = %d, want 10", cfg.Gateway.UsageRecord.OverflowSamplePercent)
