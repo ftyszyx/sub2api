@@ -15,41 +15,18 @@ cd deploy
 docker compose -f docker-compose.dev.yml up -d postgres redis
 ```
 
-### 准备后端配置
+### 启动后端
 
-先复制配置模板：
+windows默认工作目录 是/app/data 就是当前盘的目录，需要指定 DATA_DIR 环境变量。
 
-```bash
-cp deploy/config.example.yaml backend/config.yaml
+````bash
+cd backend
+go run ./cmd/server
 ```
 
-然后编辑 [backend/config.yaml](../backend/config.yaml)，至少确认这些配置：
-
-- `server.host`
-- `server.port`
-- `database.host`
-- `database.port`
-- `database.user`
-- `database.password`
-- `database.dbname`
-- `redis.host`
-- `redis.port`
-- `redis.password`
-- `jwt.secret`
-
-如果你只是本地开发，数据库和 Redis 可以直接指向：
-
-- PostgreSQL: `127.0.0.1:5432`
-- Redis: `127.0.0.1:6379`
-
-如果前端页面不是通过本项目自带代理访问后端，而是浏览器直接从另一个源请求接口，例如页面在 `http://127.0.0.1:4321`、接口在 `https://sub2api.1postpro.com`，那就需要在后端配置里显式放行该来源。否则浏览器预检 `OPTIONS` 会失败，并出现类似下面的报错：
-
-```text
-No 'Access-Control-Allow-Origin' header is present on the requested resource
-```
-
-可以在实际运行使用的 `config.yaml` 中加入：
-
+如果是第一次运行且配置未完成，程序会进入 setup 流程。
+再去修改/app/data/config.yaml
+修改
 ```yaml
 cors:
   allowed_origins:
@@ -57,26 +34,18 @@ cors:
     - "http://localhost:4321"
   allow_credentials: true
 ```
-
-补充说明：
-
-- 源码方式启动时，通常修改 `backend/config.yaml`
-- Docker / 1Panel 部署时，通常修改 `deploy/data/config.yaml`
-- 如果临时想对所有来源开放，可以写成 `allowed_origins: ["*"]`，但这时 `allow_credentials` 必须设为 `false`
-- 修改后需要重启后端服务
-
-### 启动后端
-windows默认工作目录 是/app/data 就是当前盘的目录，需要指定 DATA_DIR 环境变量。
-
-``````bash
-cd backend
-$env:DATA_DIR="."
-go run ./cmd/server
-```
-
-如果是第一次运行且配置未完成，程序会进入 setup 流程。
+- `server.port`
 
 ### 启动前端
+
+## 增加
+frontend/.env.local
+
+## 设置端口
+
+VITE_DEV_PROXY_TARGET=http://localhost:9080
+
+
 
 ```bash
 cd frontend
@@ -90,3 +59,4 @@ pnpm dev
 
 - 前端开发页：`http://localhost:3000`
 - 后端服务：`http://localhost:8080`
+````
