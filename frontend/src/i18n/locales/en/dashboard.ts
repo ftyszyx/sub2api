@@ -519,6 +519,32 @@ export default {
     }
   },
 
+  modelMarketplace: {
+    title: 'Model Marketplace',
+    description: 'Browse every provider, group, and model available to your account',
+    modelCount: '{count} models',
+    filters: 'Filters',
+    reset: 'Reset',
+    providers: 'Providers',
+    groups: 'Available Groups',
+    allProviders: 'All Providers',
+    allGroups: 'All Groups',
+    searchPlaceholder: 'Search models, platforms, channels, or groups',
+    gridView: 'Card view',
+    tableView: 'Table view',
+    empty: 'No models match these filters',
+    copyModel: 'Copy model name',
+    model: 'Model',
+    platform: 'Platform',
+    pricing: 'Pricing',
+    noPricing: 'Pricing not configured',
+    input: 'Input',
+    output: 'Output',
+    perRequest: 'Per request',
+    imageOutput: 'Image output',
+    billing: { token: 'Token billing', per_request: 'Per request', image: 'Image billing', video: 'Video billing', unknown: 'Not configured' }
+  },
+
   affiliate: {
     title: 'Affiliate Rebates',
     description: 'Invite new users and convert your rebate quota into account balance',

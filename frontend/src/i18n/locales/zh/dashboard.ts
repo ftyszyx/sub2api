@@ -524,6 +524,32 @@ export default {
     }
   },
 
+  modelMarketplace: {
+    title: '模型广场',
+    description: '浏览当前账号可访问的全部分组、供应商与模型',
+    modelCount: '共 {count} 个模型',
+    filters: '筛选',
+    reset: '重置',
+    providers: '供应商',
+    groups: '可用分组',
+    allProviders: '全部供应商',
+    allGroups: '全部分组',
+    searchPlaceholder: '搜索模型名称、平台、渠道或分组',
+    gridView: '卡片视图',
+    tableView: '表格视图',
+    empty: '没有符合条件的模型',
+    copyModel: '复制模型名称',
+    model: '模型',
+    platform: '平台',
+    pricing: '价格',
+    noPricing: '未配置定价',
+    input: '输入',
+    output: '输出',
+    perRequest: '每次请求',
+    imageOutput: '图片输出',
+    billing: { token: '按量计费', per_request: '按次计费', image: '图片计费', video: '视频计费', unknown: '未配置计费' }
+  },
+
   affiliate: {
     title: '邀请返利',
     description: '邀请新用户注册，并将返利额度转入账户余额',

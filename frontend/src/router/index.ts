@@ -255,6 +255,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/model-marketplace',
+    name: 'ModelMarketplace',
+    component: () => import('@/views/user/ModelMarketplaceView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Model Marketplace',
+      titleKey: 'modelMarketplace.title',
+      descriptionKey: 'modelMarketplace.description'
+    }
+  },
+  {
     path: '/available-channels',
     name: 'UserAvailableChannels',
     component: () => import('@/views/user/AvailableChannelsView.vue'),

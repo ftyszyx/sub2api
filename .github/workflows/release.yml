@@ -115,7 +115,9 @@ jobs:
 
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.26.5'
+          required="$(awk '/^go / { print $2; exit }' backend/go.mod)"
+          go version
+          go version | grep -q "go${required}"
 
       # Docker setup for GoReleaser
       - name: Set up QEMU
